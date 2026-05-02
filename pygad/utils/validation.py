@@ -1367,6 +1367,10 @@ class Validation:
         # Supported in PyGAD 3.2.0. It holds the pareto fronts when solving a multi-objective problem.
         self.pareto_fronts = None
 
+        # Added for run metrics recorder. Holds metrics for each generation during run().
+        # Structure: {'generation': [], 'time_elapsed': [], 'best_fitness': [], 'mean_fitness': [], 'diversity': []}
+        self.run_metrics = None
+
     def validate_multi_stop_criteria(self, stop_word, number):
         if stop_word == 'reach':
             pass
