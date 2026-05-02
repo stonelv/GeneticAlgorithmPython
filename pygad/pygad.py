@@ -63,7 +63,8 @@ class GA(utils.parent_selection.ParentSelection,
                  stop_criteria=None,
                  parallel_processing=None,
                  random_seed=None,
-                 logger=None):
+                 logger=None,
+                 constraint_func=None):
         """
         The constructor of the GA class accepts all parameters required to create an instance of the GA class. It validates such parameters.
 
@@ -129,6 +130,17 @@ class GA(utils.parent_selection.ParentSelection,
         random_seed: Added in PyGAD 2.18.0. It defines the random seed to be used by the random function generators (we use random functions in the NumPy and random modules). This helps to reproduce the same results by setting the same random seed.
 
         logger: Added in PyGAD 2.20.0. It accepts a logger object of the 'logging.Logger' class to log the messages. If no logger is passed, then a default logger is created to log/print the messages to the console exactly like using the 'print()' function.
+        
+        constraint_func: Added for constrained multi-objective optimization (NSGA-II). Accepts a function/method that returns the constraint violation values for a solution. 
+            For each constraint, return a value <= 0 if the constraint is satisfied, or > 0 if the constraint is violated.
+            The function signature must be: constraint_func(solution, solution_idx)
+            - solution: The solution/chromosome to check constraints for.
+            - solution_idx: The index of the solution within the population.
+            Returns a list/tuple/numpy.ndarray of constraint violation values, one for each constraint.
+            When using NSGA-II with constraints, constraint domination principle is used instead of regular Pareto domination:
+            1) A feasible solution (all constraints satisfied) always dominates an infeasible solution.
+            2) Between two feasible solutions, regular Pareto domination applies.
+            3) Between two infeasible solutions, the one with smaller constraint violation dominates.
         """
         try:
             self.validate_parameters(num_generations=num_generations,
@@ -171,7 +183,8 @@ class GA(utils.parent_selection.ParentSelection,
                                      stop_criteria=stop_criteria,
                                      parallel_processing=parallel_processing,
                                      random_seed=random_seed,
-                                     logger=logger)
+                                     logger=logger,
+                                     constraint_func=constraint_func)
         except Exception as e:
             self.logger.exception(e)
             # sys.exit(-1)

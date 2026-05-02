@@ -46,7 +46,8 @@ class Validation:
                             stop_criteria,
                             parallel_processing,
                             random_seed,
-                            logger):
+                            logger,
+                            constraint_func=None):
         
         # If no logger is passed, then create a logger that logs only the messages to the console.
         if logger is None:
@@ -1316,6 +1317,35 @@ class Validation:
         else:
             self.valid_parameters = False
             raise ValueError(f"Unexpected value ({parallel_processing}) of type ({type(parallel_processing)}) assigned to the 'parallel_processing' parameter. The accepted values for this parameter are:\n1) None: (Default) It means no parallel processing is used.\n2) A positive integer referring to the number of threads to be used (i.e. threads, not processes, are used.\n3) list/tuple: If a list or a tuple of exactly 2 elements is assigned, then:\n\t*1) The first element can be either 'process' or 'thread' to specify whether processes or threads are used, respectively.\n\t*2) The second element can be:\n\t\t**1) A positive integer to select the maximum number of processes or threads to be used.\n\t\t**2) 0 to indicate that parallel processing is not used. This is identical to setting 'parallel_processing=None'.\n\t\t**3) None to use the default value as calculated by the concurrent.futures module.")
+
+        # Validate the constraint_func parameter for constrained multi-objective optimization.
+        if constraint_func is None:
+            self.constraint_func = None
+        elif inspect.ismethod(constraint_func):
+            if len(inspect.signature(constraint_func).parameters) == 2:
+                self.constraint_func = constraint_func
+            else:
+                self.valid_parameters = False
+                raise ValueError(f"The constraint_func method must accept 2 parameters:\n1) The solution/chromosome to check constraints for.\n2) The index of the solution within the population.\n\nThe passed constraint_func method named '{constraint_func.__code__.co_name}' accepts {len(inspect.signature(constraint_func).parameters)} parameter(s).")
+        elif inspect.isfunction(constraint_func):
+            if len(inspect.signature(constraint_func).parameters) == 2:
+                self.constraint_func = constraint_func
+            else:
+                self.valid_parameters = False
+                raise ValueError(f"The constraint_func function must accept 2 parameters:\n1) The solution/chromosome to check constraints for.\n2) The index of the solution within the population.\n\nThe passed constraint_func function named '{constraint_func.__code__.co_name}' accepts {len(inspect.signature(constraint_func).parameters)} parameter(s).")
+        elif callable(constraint_func) and not inspect.isclass(constraint_func):
+            if hasattr(constraint_func, '__call__'):
+                if len(inspect.signature(constraint_func).parameters) == 2:
+                    self.constraint_func = constraint_func
+                else:
+                    self.valid_parameters = False
+                    raise ValueError(f"When 'constraint_func' is assigned a class instance, then its __call__ method must accept 2 parameters:\n1) The solution/chromosome to check constraints for.\n2) The index of the solution within the population.\n\nThe passed instance of the class named '{constraint_func.__class__.__name__}' accepts {len(inspect.signature(constraint_func).parameters)} parameter(s).")
+            else:
+                self.valid_parameters = False
+                raise ValueError("When 'constraint_func' is assigned a class instance, then its __call__ method must be implemented and accept 2 parameters.")
+        else:
+            self.valid_parameters = False
+            raise TypeError(f"The value assigned to the constraint_func parameter is expected to be None, a function, a method, or a callable class instance but {type(constraint_func)} found.")
 
         # Set the `run_completed` property to False. It is set to `True` only after the `run()` method is complete.
         self.run_completed = False
