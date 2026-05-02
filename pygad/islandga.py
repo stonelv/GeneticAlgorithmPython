@@ -237,7 +237,9 @@ class IslandGA:
     
     def _perform_migration(self):
         """执行迁移操作"""
-        all_migrants = []
+        from collections import defaultdict
+        
+        migrants_by_destination = defaultdict(list)
         modified_islands = set()
         
         for island_idx, ga_instance in enumerate(self.islands):
@@ -248,24 +250,30 @@ class IslandGA:
             for dest_idx in destinations:
                 modified_islands.add(dest_idx)
                 for migrant_idx, migrant in enumerate(migrants):
-                    all_migrants.append({
+                    migrants_by_destination[dest_idx].append({
                         'source': island_idx,
-                        'destination': dest_idx,
                         'individual': migrant.copy(),
                         'fitness': migrant_fitness[migrant_idx]
                     })
         
-        for migration in all_migrants:
-            dest_idx = migration['destination']
+        for dest_idx, incoming_migrants in migrants_by_destination.items():
             dest_ga = self.islands[dest_idx]
-            dest_fitness = dest_ga.last_generation_fitness
+            dest_fitness = dest_ga.last_generation_fitness.copy()
             
-            self._replace_individuals(
-                dest_ga, 
-                dest_fitness, 
-                [migration['individual']],
-                [migration['fitness']]
-            )
+            new_individuals = [m['individual'] for m in incoming_migrants]
+            new_fitness = [m['fitness'] for m in incoming_migrants]
+            
+            num_to_replace = min(len(new_individuals), len(dest_fitness))
+            
+            if self.replacement == 'worst':
+                sorted_indices = numpy.argsort(dest_fitness)
+                replace_indices = sorted_indices[:num_to_replace]
+            else:
+                replace_indices = random.sample(range(len(dest_fitness)), num_to_replace)
+            
+            for i, idx in enumerate(replace_indices):
+                if i < len(new_individuals):
+                    dest_ga.population[idx] = new_individuals[i].copy()
         
         for island_idx in modified_islands:
             self.islands[island_idx].last_generation_fitness = self.islands[island_idx].cal_pop_fitness()
