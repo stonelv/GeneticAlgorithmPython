@@ -451,6 +451,12 @@ class GAEngine:
 
             # Initialize run metrics recorder if not already initialized.
             # This allows calling run() multiple times while extending the metrics.
+            # Metrics definition:
+            # - generation[i]: Generation number (0-based)
+            # - time_elapsed[i]: Time elapsed from the previous record to this record (seconds)
+            # - best_fitness[i]: Best fitness value of the population at this generation
+            # - mean_fitness[i]: Mean fitness value of the population at this generation
+            # - diversity[i]: Population diversity (average gene variance) at this generation
             if self.run_metrics is None:
                 self.run_metrics = {
                     'generation': [],
@@ -462,9 +468,8 @@ class GAEngine:
 
             # Track time for each generation.
             # start_time marks the beginning of the period to measure.
+            # For the first generation, this measures from run() start to first record.
             start_time = time.time()
-            # is_first_generation helps handle the first generation differently (no elapsed time before it).
-            is_first_generation = True
 
             for generation in range(generation_first_idx, generation_last_idx):
 
@@ -472,16 +477,13 @@ class GAEngine:
 
                 # Record metrics for the current generation after run_loop_head()
                 # because run_loop_head() appends to best_solutions_fitness.
+                # This ensures run_metrics['best_fitness'][i] == best_solutions_fitness[i]
                 current_generation = len(self.run_metrics['generation'])
                 
-                # Calculate time elapsed. 
-                # For the first generation, time_elapsed is 0 because no operations 
-                # have been performed yet for this generation.
-                if is_first_generation:
-                    time_elapsed = 0.0
-                    is_first_generation = False
-                else:
-                    time_elapsed = time.time() - start_time
+                # Calculate time elapsed from the previous record to this record.
+                # For the first generation, this is the time from run() start to now.
+                # For subsequent generations, this is the time since the last record.
+                time_elapsed = time.time() - start_time
                 
                 # Calculate mean fitness - handle both single-objective and multi-objective.
                 if type(self.last_generation_fitness[0]) in self.supported_int_float_types:
@@ -511,6 +513,7 @@ class GAEngine:
                 self.run_metrics['diversity'].append(diversity)
                 
                 # Reset start time for next generation.
+                # This measures the time from this record to the next record.
                 start_time = time.time()
 
                 # Call the 'run_select_parents()' method to select the parents.
@@ -643,36 +646,6 @@ class GAEngine:
             _, best_solution_fitness, _ = self.best_solution(
                 pop_fitness=self.last_generation_fitness)
             self.best_solutions_fitness.append(best_solution_fitness)
-
-            # Record metrics for the last generation after the loop ends.
-            # The loop recorded generations 0 to num_generations-1.
-            # Now we record generation num_generations.
-            if self.run_metrics is not None and len(self.run_metrics['generation']) > 0:
-                current_generation = len(self.run_metrics['generation'])
-                
-                # Calculate time elapsed for the last generation.
-                time_elapsed = time.time() - start_time
-                
-                # Calculate mean fitness.
-                if type(self.last_generation_fitness[0]) in self.supported_int_float_types:
-                    mean_fitness = numpy.mean(self.last_generation_fitness)
-                else:
-                    mean_fitness = numpy.mean(self.last_generation_fitness, axis=0).tolist()
-                
-                # Calculate diversity.
-                try:
-                    pop_float = numpy.array(self.population, dtype=float)
-                    gene_variances = numpy.var(pop_float, axis=0)
-                    diversity = numpy.mean(gene_variances)
-                except (TypeError, ValueError):
-                    diversity = float('nan')
-                
-                # Append all metrics.
-                self.run_metrics['generation'].append(current_generation)
-                self.run_metrics['time_elapsed'].append(time_elapsed)
-                self.run_metrics['best_fitness'].append(best_solution_fitness)
-                self.run_metrics['mean_fitness'].append(mean_fitness)
-                self.run_metrics['diversity'].append(diversity)
 
             self.best_solution_generation = numpy.where(numpy.array(
                 self.best_solutions_fitness) == numpy.max(numpy.array(self.best_solutions_fitness)))[0][0]
