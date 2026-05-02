@@ -1,5 +1,6 @@
 import numpy
 import cloudpickle
+import csv
 from pygad import utils
 from pygad import helper
 from pygad import visualize
@@ -187,6 +188,120 @@ class GA(utils.parent_selection.ParentSelection,
         with open(filename + ".pkl", 'wb') as file:
             file.write(cloudpickle_serialized_object)
             cloudpickle.dump(self, file)
+
+    def to_csv(self, filename, delimiter=','):
+        """
+        Exports the recorded run metrics to a CSV file.
+        
+        This method exports the metrics recorded during the `run()` method to a CSV file.
+        The metrics include generation number, time elapsed, best fitness, mean fitness,
+        and population diversity (gene variance).
+        
+        Parameters
+        ----------
+        filename : str
+            Name of the CSV file to save the metrics. The '.csv' extension will be 
+            added if not present.
+        
+        delimiter : str, optional
+            Delimiter to use in the CSV file. Default is ','.
+        
+        Returns
+        -------
+        None
+        
+        Notes
+        -----
+        This method can only be called after completing at least 1 generation.
+        If no generation is completed, a RuntimeError is raised.
+        
+        For multi-objective optimization problems, the `best_fitness` and `mean_fitness` 
+        columns will contain multiple values separated by semicolons.
+        
+        Examples
+        --------
+        >>> import pygad
+        >>> import numpy
+        >>> 
+        >>> def fitness_func(ga_instance, solution, solution_idx):
+        ...     output = numpy.sum(solution * [4, -2, 3.5, 5, -11, -4.7])
+        ...     fitness = 1.0 / (numpy.abs(output - 44) + 0.000001)
+        ...     return fitness
+        >>> 
+        >>> ga_instance = pygad.GA(num_generations=10,
+        ...                        num_parents_mating=4,
+        ...                        sol_per_pop=8,
+        ...                        num_genes=6,
+        ...                        fitness_func=fitness_func)
+        >>> 
+        >>> ga_instance.run()
+        >>> ga_instance.to_csv('ga_metrics.csv')
+        """
+        if self.run_metrics is None or len(self.run_metrics['generation']) == 0:
+            self.logger.error("The to_csv() method can only be called after completing at least 1 generation.")
+            raise RuntimeError("The to_csv() method can only be called after completing at least 1 generation.")
+        
+        # Add .csv extension if not present
+        if not filename.endswith('.csv'):
+            filename = filename + '.csv'
+        
+        # Prepare headers
+        headers = ['generation', 'time_elapsed', 'best_fitness', 'mean_fitness', 'diversity']
+        
+        # Check if this is a multi-objective problem
+        # If best_fitness is a list/tuple/ndarray, then it's multi-objective
+        is_multi_objective = False
+        if len(self.run_metrics['best_fitness']) > 0:
+            first_best_fitness = self.run_metrics['best_fitness'][0]
+            if type(first_best_fitness) in [list, tuple, numpy.ndarray]:
+                is_multi_objective = True
+        
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=delimiter)
+            
+            # Write header
+            writer.writerow(headers)
+            
+            # Write data rows
+            num_rows = len(self.run_metrics['generation'])
+            for i in range(num_rows):
+                generation = self.run_metrics['generation'][i]
+                time_elapsed = self.run_metrics['time_elapsed'][i]
+                best_fitness = self.run_metrics['best_fitness'][i]
+                mean_fitness = self.run_metrics['mean_fitness'][i]
+                diversity = self.run_metrics['diversity'][i]
+                
+                # Format fitness values for multi-objective problems
+                if is_multi_objective:
+                    # Convert list/tuple/ndarray to semicolon-separated string
+                    if type(best_fitness) in [list, tuple, numpy.ndarray]:
+                        best_fitness_str = ';'.join(str(v) for v in best_fitness)
+                    else:
+                        best_fitness_str = str(best_fitness)
+                    
+                    if type(mean_fitness) in [list, tuple, numpy.ndarray]:
+                        mean_fitness_str = ';'.join(str(v) for v in mean_fitness)
+                    else:
+                        mean_fitness_str = str(mean_fitness)
+                else:
+                    best_fitness_str = str(best_fitness)
+                    mean_fitness_str = str(mean_fitness)
+                
+                # Format diversity (handle NaN)
+                if numpy.isnan(diversity):
+                    diversity_str = 'NaN'
+                else:
+                    diversity_str = str(diversity)
+                
+                writer.writerow([
+                    generation,
+                    time_elapsed,
+                    best_fitness_str,
+                    mean_fitness_str,
+                    diversity_str
+                ])
+        
+        self.logger.info(f"Run metrics saved to {filename}")
 
 def load(filename):
     """
