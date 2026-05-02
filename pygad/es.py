@@ -75,7 +75,7 @@ class ES:
         步长自适应方法：
         - "none": 固定σ
         - "1/5-rule": 1/5成功规则
-        - "log-normal": 对数正态变异（σ自身变异）
+        - "log-normal": 对数正态变异（σ自身变异，推荐）
         - "cumulative": 累积步长自适应 (CSA)
         默认 "log-normal"。
         
@@ -97,11 +97,21 @@ class ES:
     one_fifth_g : int, optional
         1/5规则的更新频率（每g代更新一次），默认 1。
         
+    cs : float, optional
+        CSA累积步长自适应的累积率。默认 0.3。
+        
+    damping : float, optional
+        CSA的阻尼因子。默认 1.0。
+        
     gene_space : list, optional
-        定义每个基因的可能取值范围。
+        定义每个基因的可能取值范围。支持：
+        - [low, high]: 连续范围
+        - [val1, val2, ...]: 离散值列表
+        - {"low": x, "high": y}: 字典形式
         
     gene_constraint : list, optional
-        定义每个基因的约束函数。
+        定义每个基因的约束函数。每个约束函数签名：
+        constraint_func(solution, values) -> filtered_values
         
     sample_size : int, optional
         满足约束时的采样大小，默认 100。
@@ -175,6 +185,8 @@ class ES:
                  tau_prime=None,
                  one_fifth_c=0.85,
                  one_fifth_g=1,
+                 cs=None,
+                 damping=None,
                  gene_space=None,
                  gene_constraint=None,
                  sample_size=100,
@@ -219,6 +231,8 @@ class ES:
         self.tau_prime = tau_prime
         self.one_fifth_c = one_fifth_c
         self.one_fifth_g = one_fifth_g
+        self.cs = cs if cs is not None else 0.3
+        self.damping = damping if damping is not None else 1.0
         self.gene_space = gene_space
         self.gene_constraint = gene_constraint
         self.sample_size = sample_size
@@ -308,19 +322,31 @@ class ES:
         if self.selection_type == "comma" and self.lambda_ < self.mu:
             raise ValueError(f"For (μ,λ)-ES, lambda_ ({self.lambda_}) must be >= mu ({self.mu})")
 
+        if self.gene_space is not None:
+            if not isinstance(self.gene_space, (list, dict)):
+                raise TypeError("gene_space must be list or dict")
+
+        if self.gene_constraint is not None:
+            if not isinstance(self.gene_constraint, list):
+                raise TypeError("gene_constraint must be list of callable functions")
+
         self.valid_parameters = True
 
     def _initialize_population_and_sigma(self):
         if self.initial_population is not None:
             self.population = self.initial_population.copy()
         else:
-            self.population = numpy.random.uniform(
-                low=self.init_range_low,
-                high=self.init_range_high,
-                size=(self.mu, self.num_genes)
-            )
+            if self.gene_space is not None:
+                self.population = self._generate_population_from_gene_space()
+            else:
+                self.population = numpy.random.uniform(
+                    low=self.init_range_low,
+                    high=self.init_range_high,
+                    size=(self.mu, self.num_genes)
+                )
 
         self.population = self._apply_gene_type(self.population)
+        self.population = self._apply_all_constraints(self.population)
 
         if isinstance(self.sigma, (int, float)):
             self.population_sigma = numpy.full((self.mu, self.num_genes), float(self.sigma))
@@ -341,6 +367,44 @@ class ES:
 
         self.population_sigma = self.population_sigma.astype(float)
 
+    def _generate_population_from_gene_space(self):
+        population = numpy.empty((self.mu, self.num_genes), dtype=float)
+        
+        if isinstance(self.gene_space, dict):
+            for i in range(self.mu):
+                for j in range(self.num_genes):
+                    population[i, j] = self._sample_gene_space(self.gene_space)
+        elif isinstance(self.gene_space, list):
+            for i in range(self.mu):
+                for j in range(self.num_genes):
+                    if len(self.gene_space) == 2 and isinstance(self.gene_space[0], (int, float)) and isinstance(self.gene_space[1], (int, float)):
+                        space = self.gene_space
+                    else:
+                        space = self.gene_space[j % len(self.gene_space)]
+                    population[i, j] = self._sample_gene_space(space)
+        
+        return population
+
+    def _sample_gene_space(self, space):
+        if isinstance(space, dict):
+            if "step" in space and "low" in space and "high" in space:
+                low = space["low"]
+                high = space["high"]
+                step = space["step"]
+                vals = numpy.arange(low, high, step)
+                return numpy.random.choice(vals)
+            elif "low" in space and "high" in space:
+                return numpy.random.uniform(space["low"], space["high"])
+            else:
+                raise ValueError(f"Invalid gene_space dict: {space}")
+        elif isinstance(space, (list, tuple, numpy.ndarray)):
+            if len(space) == 2 and isinstance(space[0], (int, float)) and isinstance(space[1], (int, float)):
+                return numpy.random.uniform(space[0], space[1])
+            else:
+                return numpy.random.choice(space)
+        else:
+            raise TypeError(f"Unsupported gene_space type: {type(space)}")
+
     def _initialize_learning_rates(self):
         if self.sigma_adaptation in ["log-normal", "cumulative"]:
             n = self.num_genes
@@ -350,9 +414,12 @@ class ES:
                 self.tau_prime = 1.0 / numpy.sqrt(2 * n)
 
         if self.sigma_adaptation == "cumulative":
-            self._path_length = numpy.zeros(self.num_genes)
-            self._path_sigma = numpy.zeros(self.num_genes)
+            n = self.num_genes
+            self._path_sigma = numpy.zeros(n)
+            self._path_length = 0.0
             self._cumulative_generation = 0
+            self._mu_w = 1.0 / self.mu
+            self._sigma_factor = 1.0
 
         self._successful_mutations = []
 
@@ -369,6 +436,7 @@ class ES:
         self._last_parents = None
         self._last_offspring = None
         self._last_offspring_sigma = None
+        self._last_mutation_offsets = None
 
     def _apply_gene_type(self, arr):
         if self.gene_type == int:
@@ -381,6 +449,76 @@ class ES:
             return arr.astype(self.gene_type)
         else:
             return arr
+
+    def _apply_all_constraints(self, solutions):
+        if self.gene_space is None and self.gene_constraint is None:
+            return solutions
+
+        constrained = solutions.copy()
+        for i in range(len(solutions)):
+            for j in range(self.num_genes):
+                val = constrained[i, j]
+                
+                if self.gene_space is not None:
+                    val = self._apply_gene_space_constraint(val, j)
+                
+                if self.gene_constraint is not None and j < len(self.gene_constraint):
+                    constraint = self.gene_constraint[j]
+                    if constraint is not None:
+                        val = self._apply_gene_constraint(val, j, constraint, constrained[i])
+                
+                constrained[i, j] = val
+        
+        return constrained
+
+    def _apply_gene_space_constraint(self, value, gene_idx):
+        if self.gene_space is None:
+            return value
+        
+        if isinstance(self.gene_space, dict):
+            return self._clip_to_space(value, self.gene_space)
+        elif isinstance(self.gene_space, list):
+            if len(self.gene_space) == 2 and isinstance(self.gene_space[0], (int, float)) and isinstance(self.gene_space[1], (int, float)):
+                return self._clip_to_space(value, self.gene_space)
+            else:
+                space = self.gene_space[gene_idx % len(self.gene_space)]
+                return self._clip_to_space(value, space)
+        return value
+
+    def _clip_to_space(self, value, space):
+        if isinstance(space, dict):
+            if "step" in space and "low" in space and "high" in space:
+                low, high, step = space["low"], space["high"], space["step"]
+                vals = numpy.arange(low, high, step)
+                idx = numpy.argmin(numpy.abs(vals - value))
+                return vals[idx]
+            elif "low" in space and "high" in space:
+                low, high = space["low"], space["high"]
+                return numpy.clip(value, low, high)
+        elif isinstance(space, (list, tuple)):
+            if len(space) == 2 and isinstance(space[0], (int, float)) and isinstance(space[1], (int, float)):
+                return numpy.clip(value, space[0], space[1])
+            else:
+                vals = numpy.asarray(space)
+                idx = numpy.argmin(numpy.abs(vals - value))
+                return vals[idx]
+        return value
+
+    def _apply_gene_constraint(self, value, gene_idx, constraint, solution):
+        values = [value]
+        filtered = constraint(solution.copy(), values)
+        
+        if filtered is None or len(filtered) == 0:
+            if not self.suppress_warnings:
+                warnings.warn(f"No valid value found for gene {gene_idx} under constraint. Using original value.")
+            return value
+        
+        if len(filtered) == 1:
+            return filtered[0]
+        
+        valid_values = numpy.asarray(filtered)
+        idx = numpy.argmin(numpy.abs(valid_values - value))
+        return valid_values[idx]
 
     def save(self, filename):
         cloudpickle_serialized_object = cloudpickle.dumps(self)
@@ -519,12 +657,15 @@ class ES:
                         children[i, gene_idx] = parent1[gene_idx]
                         children_sigma[i, gene_idx] = sigma1[gene_idx]
 
+        children = self._apply_all_constraints(children)
         return children, children_sigma
 
     def _mutation(self, children, children_sigma):
         num_children = len(children)
         mutated_children = children.copy()
         mutated_sigma = children_sigma.copy()
+        
+        mutation_offsets = numpy.empty_like(mutated_children)
 
         if self.sigma_adaptation == "log-normal":
             for i in range(num_children):
@@ -535,15 +676,21 @@ class ES:
                     self.tau_prime * N0 + self.tau * N
                 )
 
-                mutated_children[i] = children[i] + mutated_sigma[i] * numpy.random.randn(self.num_genes)
+                z = numpy.random.randn(self.num_genes)
+                mutation_offsets[i] = mutated_sigma[i] * z
+                mutated_children[i] = children[i] + mutation_offsets[i]
 
         elif self.sigma_adaptation == "none":
             for i in range(num_children):
-                mutated_children[i] = children[i] + children_sigma[i] * numpy.random.randn(self.num_genes)
+                z = numpy.random.randn(self.num_genes)
+                mutation_offsets[i] = children_sigma[i] * z
+                mutated_children[i] = children[i] + mutation_offsets[i]
 
         elif self.sigma_adaptation == "1/5-rule":
             for i in range(num_children):
-                mutated_children[i] = children[i] + children_sigma[i] * numpy.random.randn(self.num_genes)
+                z = numpy.random.randn(self.num_genes)
+                mutation_offsets[i] = children_sigma[i] * z
+                mutated_children[i] = children[i] + mutation_offsets[i]
 
         elif self.sigma_adaptation == "cumulative":
             for i in range(num_children):
@@ -554,8 +701,13 @@ class ES:
                     self.tau_prime * N0 + self.tau * N
                 )
 
-                mutated_children[i] = children[i] + mutated_sigma[i] * numpy.random.randn(self.num_genes)
+                z = numpy.random.randn(self.num_genes)
+                mutation_offsets[i] = mutated_sigma[i] * z
+                mutated_children[i] = children[i] + mutation_offsets[i]
 
+        mutated_children = self._apply_all_constraints(mutated_children)
+        self._last_mutation_offsets = mutation_offsets
+        
         return mutated_children, mutated_sigma
 
     def _select_parents_for_recombination(self, fitness):
@@ -564,7 +716,11 @@ class ES:
         return parent_indices
 
     def _selection(self, parents, parents_sigma, parents_fitness,
-                   offspring, offspring_sigma, offspring_fitness):
+                   offspring, offspring_sigma, offspring_fitness,
+                   mutation_offsets=None):
+        
+        one_fifth_adjusted = False
+        
         if self.selection_type == "plus":
             combined = numpy.vstack([parents, offspring])
             combined_sigma = numpy.vstack([parents_sigma, offspring_sigma])
@@ -578,7 +734,10 @@ class ES:
                     else:
                         self._successful_mutations.append(0)
 
-                self._update_sigma_by_one_fifth()
+                sigma_multiplier = self._get_one_fifth_multiplier()
+                if sigma_multiplier != 1.0:
+                    combined_sigma *= sigma_multiplier
+                    one_fifth_adjusted = True
 
         elif self.selection_type == "comma":
             combined = offspring
@@ -593,7 +752,10 @@ class ES:
                     else:
                         self._successful_mutations.append(0)
 
-                self._update_sigma_by_one_fifth()
+                sigma_multiplier = self._get_one_fifth_multiplier()
+                if sigma_multiplier != 1.0:
+                    combined_sigma *= sigma_multiplier
+                    one_fifth_adjusted = True
 
         sorted_indices = numpy.argsort(combined_fitness)[::-1]
         selected_indices = sorted_indices[:self.mu]
@@ -601,19 +763,72 @@ class ES:
         new_population = combined[selected_indices]
         new_population_sigma = combined_sigma[selected_indices]
 
+        if self.sigma_adaptation == "cumulative":
+            new_population_sigma = self._update_cumulative_sigma(
+                new_population, new_population_sigma,
+                mutation_offsets, selected_indices
+            )
+
         return new_population, new_population_sigma
 
-    def _update_sigma_by_one_fifth(self):
+    def _get_one_fifth_multiplier(self):
         if len(self._successful_mutations) < self.one_fifth_g * self.lambda_:
-            return
+            return 1.0
 
         recent = self._successful_mutations[-self.one_fifth_g * self.lambda_:]
         success_rate = sum(recent) / len(recent)
 
         if success_rate > 0.2:
-            self.population_sigma /= self.one_fifth_c
+            return 1.0 / self.one_fifth_c
         elif success_rate < 0.2:
-            self.population_sigma *= self.one_fifth_c
+            return self.one_fifth_c
+        else:
+            return 1.0
+
+    def _update_cumulative_sigma(self, population, population_sigma,
+                                  mutation_offsets, selected_indices):
+        if mutation_offsets is None:
+            return population_sigma
+
+        self._cumulative_generation += 1
+        n = self.num_genes
+        
+        selected_offsets = None
+        
+        if self.selection_type == "plus":
+            for i, idx in enumerate(selected_indices):
+                if idx >= self.mu:
+                    offspring_idx = idx - self.mu
+                    if selected_offsets is None:
+                        selected_offsets = mutation_offsets[offspring_idx:offspring_idx+1].copy()
+                    else:
+                        selected_offsets = numpy.vstack([selected_offsets, mutation_offsets[offspring_idx]])
+        else:
+            selected_offsets = mutation_offsets[selected_indices]
+
+        if selected_offsets is not None and len(selected_offsets) > 0:
+            avg_sigma = numpy.mean(population_sigma, axis=0)
+            
+            normalized_offsets = selected_offsets / avg_sigma
+            
+            y_w = numpy.mean(normalized_offsets, axis=0)
+            
+            cs = self.cs
+            self._path_sigma = (1 - cs) * self._path_sigma + numpy.sqrt(cs * (2 - cs) * self.mu) * y_w
+            
+            path_norm = numpy.linalg.norm(self._path_sigma)
+            
+            E_normal = numpy.sqrt(n) * (1 - 1/(4*n) + 1/(21*n*n))
+            
+            damping = self.damping
+            
+            sigma_factor = numpy.exp(
+                (cs / damping) * (path_norm / E_normal - 1)
+            )
+            
+            population_sigma = population_sigma * sigma_factor
+
+        return population_sigma
 
     def best_solution(self, pop_fitness=None):
         if pop_fitness is None:
@@ -688,6 +903,7 @@ class ES:
                         children, children_sigma = recomb_output
 
             mutated_children, mutated_sigma = self._mutation(children, children_sigma)
+            mutation_offsets = self._last_mutation_offsets
 
             if self.on_mutation is not None:
                 mutate_output = self.on_mutation(self, mutated_children, mutated_sigma)
@@ -707,7 +923,8 @@ class ES:
 
             self.population, self.population_sigma = self._selection(
                 self._last_parents, self.population_sigma, self.last_generation_fitness,
-                mutated_children, mutated_sigma, offspring_fitness
+                mutated_children, mutated_sigma, offspring_fitness,
+                mutation_offsets
             )
 
             self.generations_completed = generation + 1
