@@ -208,6 +208,121 @@ def test_feasible_pareto_domination():
     return True
 
 
+def test_single_objective_constraint_domination():
+    """
+    Test constraint domination for single-objective optimization.
+    
+    For single-objective:
+    1. Feasible solutions always come before infeasible ones.
+    2. Between feasible solutions: higher fitness is better.
+    3. Between infeasible solutions: smaller constraint violation is better.
+    """
+    print("\n" + "="*60)
+    print("Testing: Single-Objective Constraint Domination")
+    print("="*60)
+    
+    nsga2 = pygad.utils.nsga2.NSGA2()
+    nsga2.supported_int_float_types = [int, float, numpy.float64, numpy.int64]
+    
+    # Test case:
+    # Solution 0: feasible (cv=0), fitness=10 (best feasible)
+    # Solution 1: feasible (cv=0), fitness=5 (worse feasible)
+    # Solution 2: infeasible (cv=1), fitness=100 (good fitness but violates constraint
+    # Solution 3: infeasible (cv=5), fitness=1000 (best fitness but worst violation)
+    
+    fitness = numpy.array([10.0, 5.0, 100.0, 1000.0])
+    constraint_violations = numpy.array([0.0, 0.0, 1.0, 5.0])
+    
+    # Test: sort_solutions_nsga2 with single-objective fitness
+    sorted_indices = nsga2.sort_solutions_nsga2(
+        fitness,
+        constraint_violations=constraint_violations
+    )
+    
+    print(f"\nFitness values:")
+    for i in range(len(fitness)):
+        status = "feasible" if constraint_violations[i] <= 0 else "infeasible"
+        print(f"  Solution {i}: fitness={fitness[i]}, violation={constraint_violations[i]} ({status})")
+    
+    print(f"\nExpected order: [0, 1, 2, 3]")
+    print(f"  - Solutions 0,1 (feasible) come before 2,3 (infeasible)")
+    print(f"  - Between feasible: 0 (fitness=10) > 1 (fitness=5)")
+    print(f"  - Between infeasible: 2 (cv=1) < 3 (cv=5)")
+    print(f"\nActual sorted indices: {sorted_indices}")
+    
+    # Assertions
+    feasible_indices = [i for i in sorted_indices if constraint_violations[i] <= 0]
+    infeasible_indices = [i for i in sorted_indices if constraint_violations[i] > 0]
+    
+    print(f"\nFeasible in sorted order: {feasible_indices}")
+    print(f"Infeasible in sorted order: {infeasible_indices}")
+    
+    # All feasible should come before infeasible
+    all_feasible_first = all(
+        sorted_indices.index(f) < sorted_indices.index(inf)
+        for f in feasible_indices
+        for inf in infeasible_indices
+    )
+    assert all_feasible_first, "All feasible solutions should come before infeasible ones"
+    print("\n✓ All feasible solutions come before infeasible ones")
+    
+    # Between feasible: higher fitness first
+    if len(feasible_indices) >= 2:
+        assert fitness[feasible_indices[0]] >= fitness[feasible_indices[1]], \
+            "Between feasible solutions, higher fitness should come first"
+        print("✓ Between feasible solutions, higher fitness comes first")
+    
+    # Between infeasible: smaller violation first
+    if len(infeasible_indices) >= 2:
+        assert constraint_violations[infeasible_indices[0]] <= constraint_violations[infeasible_indices[1]], \
+            "Between infeasible solutions, smaller violation should come first"
+        print("✓ Between infeasible solutions, smaller violation comes first")
+    
+    return True
+
+
+def test_get_constraint_violations_with_solutions():
+    """
+    Test that _get_constraint_violations accepts solutions parameter.
+    """
+    print("\n" + "="*60)
+    print("Testing: _get_constraint_violations with solutions parameter")
+    print("="*60)
+    
+    nsga2 = pygad.utils.nsga2.NSGA2()
+    nsga2.supported_int_float_types = [int, float, numpy.float64, numpy.int64]
+    
+    # Define constraint_func: sum of genes should be <= 0
+    def constraint_func(solution, solution_idx):
+        return [numpy.sum(solution)]
+    
+    nsga2.constraint_func = constraint_func
+    
+    # Test with custom solutions
+    custom_solutions = numpy.array([
+        [-1.0, -2.0, -3.0],  # sum = -6 (feasible)
+        [1.0, 2.0, 3.0],       # sum = 6 (infeasible)
+        [0.0, 0.0, 0.0],         # sum = 0 (feasible)
+    ])
+    
+    # Without solutions parameter (should use self.population, but it's None)
+    result_none = nsga2._get_constraint_violations()
+    print(f"\nWithout solutions parameter (self.population is None): {result_none}")
+    assert result_none is None, "Should return None when no solutions available"
+    
+    # With solutions parameter
+    result_with_solutions = nsga2._get_constraint_violations(solutions=custom_solutions)
+    print(f"With solutions parameter: {result_with_solutions}")
+    
+    expected = numpy.array([0.0, 6.0, 0.0])  # Only positive violations are summed
+    print(f"Expected: {expected}")
+    
+    numpy.testing.assert_array_almost_equal(result_with_solutions, expected)
+    print("\n✓ _get_constraint_violations correctly uses provided solutions")
+    
+    return True
+
+
 def test_backward_compatibility():
     """
     Test that NSGA-II works without constraint_func (backward compatibility).
@@ -262,6 +377,8 @@ if __name__ == "__main__":
     test_feasible_vs_infeasible_domination()
     test_infeasible_vs_infeasible_domination()
     test_feasible_pareto_domination()
+    test_single_objective_constraint_domination()
+    test_get_constraint_violations_with_solutions()
     
     print("\n" + "="*60)
     print("Running full GA test with constraints...")

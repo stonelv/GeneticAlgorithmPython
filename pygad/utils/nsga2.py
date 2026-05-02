@@ -75,9 +75,15 @@ class NSGA2:
     
         return dominated_set, non_dominated_set
 
-    def _get_constraint_violations(self):
+    def _get_constraint_violations(self, solutions=None):
         """
         Helper method to get constraint violations if constraint_func is defined.
+        
+        Parameters
+        ----------
+        solutions : numpy.ndarray, optional
+            The solutions to calculate constraint violations for.
+            If None, uses self.population.
         
         Returns
         -------
@@ -85,8 +91,12 @@ class NSGA2:
             Total constraint violations for each solution, or None if no constraint_func.
         """
         if hasattr(self, 'constraint_func') and self.constraint_func is not None:
-            if hasattr(self, 'population') and self.population is not None:
-                return self.calculate_constraint_violations(self.constraint_func, self.population)[0]
+            if solutions is None:
+                if hasattr(self, 'population') and self.population is not None:
+                    solutions = self.population
+                else:
+                    return None
+            return self.calculate_constraint_violations(self.constraint_func, solutions)[0]
         return None
 
     def non_dominated_sorting(self, fitness, constraint_violations=None):
@@ -257,8 +267,27 @@ class NSGA2:
                 crowding_dist_pop_sorted_indices = list(crowding_dist_pop_sorted_indices)
                 solutions_sorted.extend(crowding_dist_pop_sorted_indices)
         elif type(fitness[0]) in pygad.GA.supported_int_float_types:
-            solutions_sorted = sorted(range(len(fitness)), key=lambda k: fitness[k])
-            solutions_sorted.reverse()
+            if constraint_violations is None:
+                constraint_violations = self._get_constraint_violations()
+            
+            if constraint_violations is not None:
+                # Constraint domination for single-objective:
+                # 1. Feasible solutions (cv <= 0) always come before infeasible ones
+                # 2. Between feasible solutions: higher fitness is better
+                # 3. Between infeasible solutions: smaller constraint violation is better
+                # Sort key: (is_infeasible, secondary_key)
+                # - is_infeasible: 0 for feasible, 1 for infeasible
+                # - secondary_key: for feasible, -fitness (higher first); for infeasible, cv (smaller first)
+                solutions_sorted = sorted(
+                    range(len(fitness)),
+                    key=lambda k: (
+                        constraint_violations[k] > 0,  # 0 for feasible (first), 1 for infeasible (second)
+                        -fitness[k] if constraint_violations[k] <= 0 else constraint_violations[k]
+                    )
+                )
+            else:
+                solutions_sorted = sorted(range(len(fitness)), key=lambda k: fitness[k])
+                solutions_sorted.reverse()
         else:
             raise TypeError(f'Each element in the fitness array must be of a number of an iterable (list, tuple, numpy.ndarray). But the type {type(fitness[0])} found')
 
