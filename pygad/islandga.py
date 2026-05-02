@@ -238,6 +238,7 @@ class IslandGA:
     def _perform_migration(self):
         """执行迁移操作"""
         all_migrants = []
+        modified_islands = set()
         
         for island_idx, ga_instance in enumerate(self.islands):
             fitness_values = ga_instance.last_generation_fitness
@@ -245,6 +246,7 @@ class IslandGA:
             destinations = self._get_destination_islands(island_idx)
             
             for dest_idx in destinations:
+                modified_islands.add(dest_idx)
                 for migrant_idx, migrant in enumerate(migrants):
                     all_migrants.append({
                         'source': island_idx,
@@ -264,6 +266,9 @@ class IslandGA:
                 [migration['individual']],
                 [migration['fitness']]
             )
+        
+        for island_idx in modified_islands:
+            self.islands[island_idx].last_generation_fitness = self.islands[island_idx].cal_pop_fitness()
         
         self.migrations_performed += 1
     
