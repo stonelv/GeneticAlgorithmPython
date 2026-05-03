@@ -6,6 +6,7 @@ import numpy
 import warnings
 import random
 import pygad
+from pygad.exceptions import DuplicateGeneError
 
 class Unique:
 
@@ -76,7 +77,7 @@ class Unique:
                         details = (f"Current solution: {new_solution}, "
                                   f"Gene values already in solution: {set(new_solution)}, "
                                   f"Min/Max range: [{min_val_gene}, {max_val_gene}]")
-                        raise pygad.DuplicateGeneError(
+                        raise DuplicateGeneError(
                             gene_index=duplicate_index,
                             gene_value=solution[duplicate_index],
                             solution=new_solution.copy(),
@@ -348,7 +349,7 @@ class Unique:
                     details = (f"Current solution: {solution}, "
                               f"Gene values already in solution: {set(solution)}, "
                               f"Using gene_space: {self.gene_space is not None}")
-                    raise pygad.DuplicateGeneError(
+                    raise DuplicateGeneError(
                         gene_index=duplicate_index,
                         gene_value=solution[duplicate_index],
                         solution=solution.copy(),
