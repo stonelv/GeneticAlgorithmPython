@@ -6,6 +6,7 @@ import numpy
 import warnings
 import random
 import pygad
+from pygad.exceptions import GeneConstraintError
 
 class Helper:
 
@@ -417,7 +418,7 @@ class Helper:
             pass
         else:
             # No value found for the current gene that satisfies the constraint.
-            if not self.suppress_warnings: warnings.warn(f"Failed to find a value that satisfies its gene constraint for the gene at index {gene_idx} with value {solution[gene_idx]} at generation {self.generations_completed}.")
+            if not self.suppress_warnings: warnings.warn(f"Failed to find a value that satisfies its gene constraint for the gene at index {gene_idx} with value {solution[gene_idx]} at generation {getattr(self, 'generations_completed', 0)}.")
             return None
 
         return filtered_values
@@ -820,7 +821,7 @@ class Helper:
                           f"Range: [{range_min}, {range_max}], "
                           f"Sample size used: {current_sample_size}, "
                           f"Values generated: {last_values_used}")
-                raise pygad.GeneConstraintError(
+                raise GeneConstraintError(
                     gene_index=gene_idx,
                     gene_value=gene_value,
                     solution=solution.copy(),
