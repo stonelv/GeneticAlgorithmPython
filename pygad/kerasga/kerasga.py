@@ -2,6 +2,9 @@ import copy
 import numpy
 import tensorflow.keras
 
+_model_cache = {}
+
+
 def model_weights_as_vector(model):
     """
     Reshapes the Keras model weight as a vector.
@@ -72,7 +75,8 @@ def predict(model,
             data, 
             batch_size=None,
             verbose=0,
-            steps=None):
+            steps=None,
+            reuse_model=None):
     """
     Use the PyGAD's solution to make predictions using the Keras model.
 
@@ -90,6 +94,15 @@ def predict(model,
         Verbosity mode. The default is 0. Check documentation of the Keras Model.predict() method for more information.
     steps : TYPE, optional
         The total number of steps (batches of samples). The default is None. Check documentation of the Keras Model.predict() method for more information.
+    reuse_model : None, bool, or tensorflow.keras.Model, optional
+        Controls model cloning behavior to reduce overhead:
+        - None or False (default): Always clone the model using clone_model() for each prediction.
+          This preserves the original behavior but may be slower for frequent predictions.
+        - True: Automatically cache and reuse a single cloned model instance. The model is cloned
+          only once (on first call) and subsequent calls only update its weights. This is much
+          faster but uses a module-level cache keyed by the original model's id().
+        - A Keras Model instance: Directly reuse the provided model instance. Only its weights
+          are updated. This gives the user full control over the cached model's lifecycle.
 
     Returns
     -------
@@ -97,17 +110,53 @@ def predict(model,
         The Keras model predictions.
 
     """
-    # Fetch the parameters of the best solution.
+    global _model_cache
+    
     solution_weights = model_weights_as_matrix(model=model,
                                                weights_vector=solution)
-    _model = tensorflow.keras.models.clone_model(model)
-    _model.set_weights(solution_weights)
+    
+    if reuse_model is None or reuse_model is False:
+        _model = tensorflow.keras.models.clone_model(model)
+        _model.set_weights(solution_weights)
+    elif reuse_model is True:
+        model_id = id(model)
+        if model_id not in _model_cache:
+            _model_cache[model_id] = tensorflow.keras.models.clone_model(model)
+        _model = _model_cache[model_id]
+        _model.set_weights(solution_weights)
+    else:
+        _model = reuse_model
+        _model.set_weights(solution_weights)
+    
     predictions = _model.predict(x=data,
                                  batch_size=batch_size,
                                  verbose=verbose,
                                  steps=steps)
 
     return predictions
+
+
+def clear_model_cache(model=None):
+    """
+    Clear the cached model instances.
+
+    Parameters
+    ----------
+    model : tensorflow.keras.Model, optional
+        If provided, only clear the cache entry for this specific model.
+        If None (default), clear all cached models.
+
+    This is useful when:
+    - You're done using predict() with reuse_model=True and want to free memory
+    - The original model's architecture has changed and you need a fresh clone
+    """
+    global _model_cache
+    if model is not None:
+        model_id = id(model)
+        if model_id in _model_cache:
+            del _model_cache[model_id]
+    else:
+        _model_cache.clear()
 
 class KerasGA:
 
