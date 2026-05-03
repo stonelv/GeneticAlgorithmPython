@@ -773,18 +773,60 @@ class Helper:
             -A single numeric value if sample_size=1. Or
             -An array with number of values equal to sample_size if sample_size>1. Or
             -None if no value found that satisfies the constraint.
+            
+        Falls back according to the sample_size_fallback_strategy parameter when no valid values are found.
         """
 
-        # Either generate the values randomly or from the gene space.
-        values = self.generate_gene_value(range_min=range_min,
-                                          range_max=range_max,
-                                          gene_value=gene_value,
-                                          gene_idx=gene_idx,
-                                          mutation_by_replacement=mutation_by_replacement,
-                                          sample_size=sample_size,
-                                          step=step)
-        # It returns None if no value found that satisfies the constraint.
-        values_filtered = self.filter_gene_values_by_constraint(values=values,
-                                                                solution=solution,
-                                                                gene_idx=gene_idx)
+        values_filtered = None
+        current_sample_size = sample_size
+        last_values_used = None
+        
+        while values_filtered is None:
+            values = self.generate_gene_value(range_min=range_min,
+                                              range_max=range_max,
+                                              gene_value=gene_value,
+                                              gene_idx=gene_idx,
+                                              mutation_by_replacement=mutation_by_replacement,
+                                              sample_size=current_sample_size,
+                                              step=step)
+            last_values_used = values
+            values_filtered = self.filter_gene_values_by_constraint(values=values,
+                                                                    solution=solution,
+                                                                    gene_idx=gene_idx)
+            
+            if values_filtered is not None:
+                break
+            
+            if self.sample_size_fallback_strategy == "keep":
+                break
+            elif self.sample_size_fallback_strategy == "expand_sample":
+                if current_sample_size >= self.max_sample_size:
+                    break
+                current_sample_size = min(current_sample_size * 2, self.max_sample_size)
+            elif self.sample_size_fallback_strategy == "switch_to_discrete":
+                if self.gene_space is not None:
+                    values = self.generate_gene_value_from_space(gene_idx=gene_idx,
+                                                                 mutation_by_replacement=mutation_by_replacement,
+                                                                 gene_value=gene_value,
+                                                                 solution=solution,
+                                                                 sample_size=self.max_sample_size)
+                    last_values_used = values
+                    values_filtered = self.filter_gene_values_by_constraint(values=values,
+                                                                            solution=solution,
+                                                                            gene_idx=gene_idx)
+                break
+            elif self.sample_size_fallback_strategy == "raise":
+                details = (f"Constraint callable: {self.gene_constraint[gene_idx]}, "
+                          f"Range: [{range_min}, {range_max}], "
+                          f"Sample size used: {current_sample_size}, "
+                          f"Values generated: {last_values_used}")
+                raise pygad.GeneConstraintError(
+                    gene_index=gene_idx,
+                    gene_value=gene_value,
+                    solution=solution.copy(),
+                    sample_size_used=current_sample_size,
+                    generations_completed=getattr(self, 'generations_completed', 0),
+                    details=details
+                )
+        
         return values_filtered

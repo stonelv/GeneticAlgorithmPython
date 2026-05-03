@@ -69,7 +69,28 @@ class Unique:
  
                 if temp_val in new_solution:
                     num_unsolved_duplicates = num_unsolved_duplicates + 1
-                    if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} whose value is {solution[duplicate_index]} at generation {self.generations_completed}. Consider adding more values in the gene space or use a wider range for initial population or random mutation.")
+                    
+                    if self.sample_size_fallback_strategy == "keep":
+                        if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} whose value is {solution[duplicate_index]} at generation {self.generations_completed}. Consider adding more values in the gene space or use a wider range for initial population or random mutation.")
+                    elif self.sample_size_fallback_strategy == "raise":
+                        details = (f"Current solution: {new_solution}, "
+                                  f"Gene values already in solution: {set(new_solution)}, "
+                                  f"Min/Max range: [{min_val_gene}, {max_val_gene}]")
+                        raise pygad.DuplicateGeneError(
+                            gene_index=duplicate_index,
+                            gene_value=solution[duplicate_index],
+                            solution=new_solution.copy(),
+                            sample_size_used=sample_size,
+                            generations_completed=getattr(self, 'generations_completed', 0),
+                            details=details
+                        )
+                    elif self.sample_size_fallback_strategy == "expand_sample":
+                        if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} using sample_size={sample_size}. expand_sample strategy not applicable for duplicate resolution after value generation.")
+                    elif self.sample_size_fallback_strategy == "switch_to_discrete":
+                        if self.gene_space is not None:
+                            if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} using random sampling. Switching to gene_space is not implemented for duplicate resolution after value generation.")
+                        else:
+                            if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index}. No gene_space available to switch to.")
                 else:
                     # Unique gene value found.
                     new_solution[duplicate_index] = temp_val
@@ -320,7 +341,25 @@ class Unique:
 
             if temp_val in solution:
                 num_unsolved_duplicates = num_unsolved_duplicates + 1
-                if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} whose value is {solution[duplicate_index]} at generation {self.generations_completed+1}. Consider adding more values in the gene space or use a wider range for initial population or random mutation.")
+                
+                if self.sample_size_fallback_strategy == "keep":
+                    if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} whose value is {solution[duplicate_index]} at generation {self.generations_completed+1}. Consider adding more values in the gene space or use a wider range for initial population or random mutation.")
+                elif self.sample_size_fallback_strategy == "raise":
+                    details = (f"Current solution: {solution}, "
+                              f"Gene values already in solution: {set(solution)}, "
+                              f"Using gene_space: {self.gene_space is not None}")
+                    raise pygad.DuplicateGeneError(
+                        gene_index=duplicate_index,
+                        gene_value=solution[duplicate_index],
+                        solution=solution.copy(),
+                        sample_size_used=sample_size,
+                        generations_completed=getattr(self, 'generations_completed', 0),
+                        details=details
+                    )
+                elif self.sample_size_fallback_strategy == "expand_sample":
+                    if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index} using sample_size={sample_size}. expand_sample strategy not applicable for gene_space-based duplicate resolution.")
+                elif self.sample_size_fallback_strategy == "switch_to_discrete":
+                    if not self.suppress_warnings: warnings.warn(f"Failed to find a unique value for gene with index {duplicate_index}. Already using gene_space (discrete values).")
             else:
                 solution[duplicate_index] = temp_val
     

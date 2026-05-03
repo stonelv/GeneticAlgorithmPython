@@ -4,6 +4,67 @@ from pygad import utils
 from pygad import helper
 from pygad import visualize
 
+
+class GeneConstraintError(Exception):
+    """
+    Raised when no valid gene value can be found that satisfies the gene constraint.
+    
+    Attributes:
+        gene_index (int): The index of the gene that failed the constraint.
+        gene_value (Any): The current value of the gene.
+        solution (list): The solution/chromosome containing the gene.
+        sample_size_used (int): The sample size used in the attempt.
+        generations_completed (int): Number of generations completed when the error occurred.
+        details (str): Additional diagnostic information.
+    """
+    
+    def __init__(self, gene_index, gene_value, solution=None, sample_size_used=None, 
+                 generations_completed=None, details=""):
+        self.gene_index = gene_index
+        self.gene_value = gene_value
+        self.solution = solution
+        self.sample_size_used = sample_size_used
+        self.generations_completed = generations_completed
+        self.details = details
+        
+        message = (f"Failed to find a valid gene value at index {gene_index} "
+                  f"(current value: {gene_value}). "
+                  f"Sample size used: {sample_size_used}. "
+                  f"Generations completed: {generations_completed}. "
+                  f"Details: {details}")
+        super().__init__(message)
+
+
+class DuplicateGeneError(Exception):
+    """
+    Raised when no unique gene value can be found (allow_duplicate_genes=False).
+    
+    Attributes:
+        gene_index (int): The index of the gene that has duplicate values.
+        gene_value (Any): The current value of the gene.
+        solution (list): The solution/chromosome containing the gene.
+        sample_size_used (int): The sample size used in the attempt.
+        generations_completed (int): Number of generations completed when the error occurred.
+        details (str): Additional diagnostic information.
+    """
+    
+    def __init__(self, gene_index, gene_value, solution=None, sample_size_used=None,
+                 generations_completed=None, details=""):
+        self.gene_index = gene_index
+        self.gene_value = gene_value
+        self.solution = solution
+        self.sample_size_used = sample_size_used
+        self.generations_completed = generations_completed
+        self.details = details
+        
+        message = (f"Failed to find a unique gene value at index {gene_index} "
+                  f"(current value: {gene_value}). "
+                  f"Sample size used: {sample_size_used}. "
+                  f"Generations completed: {generations_completed}. "
+                  f"Details: {details}")
+        super().__init__(message)
+
+
 # Extend all the classes so that they can be referenced by just the `self` object of the `pygad.GA` class.
 class GA(utils.parent_selection.ParentSelection,
          utils.crossover.Crossover,
@@ -63,7 +124,9 @@ class GA(utils.parent_selection.ParentSelection,
                  stop_criteria=None,
                  parallel_processing=None,
                  random_seed=None,
-                 logger=None):
+                 logger=None,
+                 sample_size_fallback_strategy="keep",
+                 max_sample_size=10000):
         """
         The constructor of the GA class accepts all parameters required to create an instance of the GA class. It validates such parameters.
 
@@ -106,6 +169,17 @@ class GA(utils.parent_selection.ParentSelection,
 
         gene_constraint: It accepts a list of constraints for the genes. Each constraint is a Python function. Added in PyGAD 3.5.0.
         sample_size: To select a gene value that respects a constraint, this variable defines the size of the sample from which a value is selected randomly. Useful if either allow_duplicate_genes or gene_constraint is used. Added in PyGAD 3.5.0.
+
+        sample_size_fallback_strategy: Defines the fallback strategy when no valid gene value can be found after sampling. 
+            Available strategies:
+            - "keep" (default): Keep the current gene value and issue a warning.
+            - "expand_sample": Expand the sample size up to max_sample_size and retry.
+            - "switch_to_discrete": Switch to using discrete gene_space values if available.
+            - "raise": Raise a GeneConstraintError or DuplicateGeneError with diagnostic information.
+            Added in PyGAD 3.6.1.
+
+        max_sample_size: The maximum sample size to use when sample_size_fallback_strategy="expand_sample". Defaults to 10000.
+            Added in PyGAD 3.6.1.
 
         on_start: Accepts a function/method to be called only once before the genetic algorithm starts its evolution. If function, then it must accept a single parameter representing the instance of the genetic algorithm. If method, then it must accept 2 parameters where the second one refers to the method's object. Added in PyGAD 2.6.0.
         on_fitness: Accepts a function/method to be called after calculating the fitness values of all solutions in the population. If function, then it must accept 2 parameters: 1) a list of all solutions' fitness values 2) the instance of the genetic algorithm. If method, then it must accept 3 parameters where the third one refers to the method's object. Added in PyGAD 2.6.0.
@@ -171,7 +245,9 @@ class GA(utils.parent_selection.ParentSelection,
                                      stop_criteria=stop_criteria,
                                      parallel_processing=parallel_processing,
                                      random_seed=random_seed,
-                                     logger=logger)
+                                     logger=logger,
+                                     sample_size_fallback_strategy=sample_size_fallback_strategy,
+                                     max_sample_size=max_sample_size)
         except Exception as e:
             self.logger.exception(e)
             # sys.exit(-1)
