@@ -5,6 +5,8 @@ import inspect
 import logging
 
 class Validation:
+    supported_fallback_strategies = ["keep", "expand_sample", "switch_to_discrete", "raise"]
+    
     def validate_parameters(self,
                             num_generations,
                             num_parents_mating,
@@ -46,7 +48,9 @@ class Validation:
                             stop_criteria,
                             parallel_processing,
                             random_seed,
-                            logger):
+                            logger,
+                            sample_size_fallback_strategy="keep",
+                            max_sample_size=10000):
         
         # If no logger is passed, then create a logger that logs only the messages to the console.
         if logger is None:
@@ -115,6 +119,36 @@ class Validation:
             raise TypeError(f"The type of the sample_size parameter must be integer but the value ({sample_size}) of type {type(sample_size)} found.")
 
         self.sample_size = sample_size
+
+        # Validate the sample_size_fallback_strategy parameter.
+        if type(sample_size_fallback_strategy) is str:
+            sample_size_fallback_strategy = sample_size_fallback_strategy.lower()
+            if sample_size_fallback_strategy in self.supported_fallback_strategies:
+                pass
+            else:
+                self.valid_parameters = False
+                raise ValueError(f"The value of the sample_size_fallback_strategy parameter must be one of {self.supported_fallback_strategies} but the value ({sample_size_fallback_strategy}) found.")
+        else:
+            self.valid_parameters = False
+            raise TypeError(f"The type of the sample_size_fallback_strategy parameter must be str but the value ({sample_size_fallback_strategy}) of type {type(sample_size_fallback_strategy)} found.")
+
+        self.sample_size_fallback_strategy = sample_size_fallback_strategy
+
+        # Validate the max_sample_size parameter.
+        if type(max_sample_size) in self.supported_int_types:
+            if max_sample_size > 0:
+                if max_sample_size < sample_size:
+                    if not self.suppress_warnings:
+                        warnings.warn(f"The value of max_sample_size ({max_sample_size}) is less than sample_size ({sample_size}). This means expand_sample strategy will not effectively expand the sample size.")
+                pass
+            else:
+                self.valid_parameters = False
+                raise ValueError(f"The value of the max_sample_size parameter must be > 0 but the value ({max_sample_size}) found.")
+        else:
+            self.valid_parameters = False
+            raise TypeError(f"The type of the max_sample_size parameter must be integer but the value ({max_sample_size}) of type {type(max_sample_size)} found.")
+
+        self.max_sample_size = max_sample_size
 
         # Validate allow_duplicate_genes
         if not (type(allow_duplicate_genes) is bool):

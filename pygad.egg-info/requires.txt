@@ -1,0 +1,7 @@
+numpy
+matplotlib
+cloudpickle
+
+[deep_learning]
+keras
+torch
